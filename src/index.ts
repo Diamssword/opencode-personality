@@ -1,5 +1,5 @@
-import type { Plugin, PluginInput } from "@opencode-ai/plugin"
-import type { CommandOutput } from "./types.js"
+import { Plugin } from "@opencode/plugin"
+import type { CommandOutput, PersonalityDefinition } from "./types.js"
 import { loadConfigWithPrecedence, resolveMoods, loadMoodState } from "./config.js"
 import { buildPersonalityPrompt } from "./prompt.js"
 import { driftMoodWithToast } from "./mood.js"
@@ -8,71 +8,55 @@ import { createSavePersonalityTool } from "./tools/savePersonality.js"
 import { handleMoodCommand } from "./commands/mood.js"
 import { handlePersonalityCommand } from "./commands/personality.js"
 
-function isCommandOutput(value: unknown): value is CommandOutput {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "parts" in value &&
-    Array.isArray((value as CommandOutput).parts)
-  )
-}
 
-const personalityPlugin: Plugin = async (input: PluginInput) => {
-  const { directory, client } = input
-  const configResult = loadConfigWithPrecedence(directory)
-
-  const savePersonalityTool = createSavePersonalityTool(configResult, client)
-
-  if (configResult.config === null) {
-    return {
-      tool: {
-        savePersonality: savePersonalityTool,
-      },
-
-      "command.execute.before": async (cmdInput, output) => {
-        if (cmdInput.command === "personality" && isCommandOutput(output)) {
-          await handlePersonalityCommand(cmdInput.arguments, configResult, output)
-        }
-      },
+const plugin = Plugin.define({
+  id: "opencode-personality",
+  async setup(ctx) {
+    const directory = ctx.location.directory;
+    const configResult = loadConfigWithPrecedence(directory)
+    if (configResult.config === null) {
+      ctx.command.transform(trans => {
+        trans.add({
+          name: "personality",
+          execute: async (input) => {
+            var res = await handlePersonalityCommand(input.prompt.text, configResult);
+            ctx.session.prompt({ sessionID: input.sessionID, text: res, delivery: input.delivery })
+          }
+        })
+      });
+      ctx.tool.transform(trans => {
+       createSavePersonalityTool(trans,configResult)
+      })
+      ctx.command.reload()
+      return;
     }
-  }
 
-  const config = configResult.config
-  const file = configResult.file!
-  const activeKey = file.active
-  const { statePath } = configResult
-  const moods = resolveMoods(config)
-
-  const setMoodTool = createSetMoodTool(statePath, config, moods, client, activeKey)
-
-  return {
-    tool: {
-      setMood: setMoodTool,
-      savePersonality: savePersonalityTool,
-    },
-
-    "command.execute.before": async (cmdInput, output) => {
-      if (!isCommandOutput(output)) return
-
-      if (cmdInput.command === "personality") {
-        await handlePersonalityCommand(cmdInput.arguments, configResult, output)
-        return
-      }
-
-      if (cmdInput.command === "mood") {
-        handleMoodCommand(
-          cmdInput.arguments,
-          statePath,
-          config,
-          moods,
-          activeKey,
-          configResult,
-          output
-        )
-      }
-    },
-
-    "experimental.chat.system.transform": async (_hookInput, output) => {
+    const config:PersonalityDefinition = configResult.config
+    const file = configResult.file!
+    const activeKey = file.active
+    const { statePath } = configResult
+    const moods = resolveMoods(config)
+    ctx.tool.transform(trans => {
+      createSetMoodTool(trans, statePath, config, moods,  activeKey)
+       createSavePersonalityTool(trans,configResult)
+    })
+    ctx.command.transform(trans => {
+      trans.add({
+        name: "personality",
+        execute: async (input) => {
+          var res = await handlePersonalityCommand(input.prompt.text, configResult);
+          ctx.session.prompt({ sessionID: input.sessionID, text: res, delivery: input.delivery })
+        }
+      });
+      trans.add({
+        name: "mood",
+        execute: async (input) => {
+          var res = handleMoodCommand(input.prompt.text,  statePath,config,moods,activeKey,configResult);
+          ctx.session.prompt({ sessionID: input.sessionID, text: res, delivery: input.delivery })
+        }
+      })
+    });
+    ctx.session.hook("context", async input => {
       let state = loadMoodState(statePath, config, activeKey)
 
       if (config.mood.enabled) {
@@ -82,33 +66,39 @@ const personalityPlugin: Plugin = async (input: PluginInput) => {
           config,
           moods,
           config.mood.seed,
-          client,
+          (s) => {
+            input.messages.push({ content:{type:"text",text:s},role:"system"})
+          },
           activeKey
         )
       }
+      const prompt = buildPersonalityPrompt(config, state.current, moods);
+      input.system.push({text:`<personality>\n${prompt}\n</personality>`,type:"text"})
+    })
 
-      const prompt = buildPersonalityPrompt(config, state.current, moods)
-      output.system.push(`<personality>\n${prompt}\n</personality>`)
-    },
-
-    event: async ({ event }) => {
-      if (event.type === "message.updated" && config.mood.enabled) {
-        const msg = event.properties as { info?: { sessionID?: string; role?: string } }
-        if (msg.info?.sessionID && msg.info.role === "assistant") {
-          const state = loadMoodState(statePath, config, activeKey)
-          await driftMoodWithToast(
-            statePath,
-            state,
-            config,
-            moods,
-            config.mood.seed,
-            client,
-            activeKey
-          )
-        }
-      }
-    },
   }
-}
+    /*return {
 
-export default personalityPlugin
+      event: async ({ event }) => {
+        if (event.type === "message.updated" && config.mood.enabled) {
+          const msg = event.properties as { info?: { sessionID?: string; role?: string } }
+          if (msg.info?.sessionID && msg.info.role === "assistant") {
+            const state = loadMoodState(statePath, config, activeKey)
+            await driftMoodWithToast(
+              statePath,
+              state,
+              config,
+              moods,
+              config.mood.seed,
+              client,
+              activeKey
+            )
+          }
+        }
+      },
+    }
+  }*/
+});
+
+
+export default plugin

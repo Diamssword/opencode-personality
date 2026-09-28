@@ -3,7 +3,6 @@ import type {
   MoodDefinition,
   PersonalityDefinition,
   MoodName,
-  PluginClient,
 } from "./types.js"
 import { saveMoodState } from "./config.js"
 
@@ -65,7 +64,7 @@ export async function driftMoodWithToast(
   config: PersonalityDefinition,
   moods: MoodDefinition[],
   seed: number | undefined,
-  client: PluginClient,
+  client: (mood:string)=>void,
   activeKey: string
 ): Promise<MoodState> {
   const previousMood = state.current
@@ -73,13 +72,8 @@ export async function driftMoodWithToast(
   saveMoodState(statePath, nextState, activeKey)
 
   if (nextState.current !== previousMood && config.mood.toast) {
-    await client.tui.showToast({
-      body: {
-        title: "Mood shifted",
-        message: `${previousMood} → ${nextState.current}`,
-        variant: "info",
-      },
-    })
+    client("Mood shifted:" + `${previousMood} → ${nextState.current}`);
+
   }
 
   return nextState

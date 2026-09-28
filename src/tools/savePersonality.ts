@@ -2,19 +2,20 @@ import { tool } from "@opencode-ai/plugin"
 import type {
   PersonalityDefinition,
   MoodDefinition,
-  PluginClient,
   ConfigResult,
 } from "../types.js"
 import { mergeWithDefaults, resolveScopePath, savePersonalityToFile } from "../config.js"
+import type { ToolEditor } from "@opencode/plugin/promise/tool"
 
 export function createSavePersonalityTool(
-  configResult: ConfigResult,
-  client: PluginClient
+  register:ToolEditor,
+  configResult: ConfigResult
 ) {
-  return tool({
+  register.add({
+    name: "savePersonality",
     description:
       "Save a personality configuration. Use this after collecting personality details from the user.",
-    args: {
+    input: {
       name: tool.schema
         .string()
         .optional()
@@ -61,9 +62,9 @@ export function createSavePersonalityTool(
         .optional()
         .describe("Where to save: project (.opencode/) or global (~/.config/opencode/)"),
     },
-    async execute(args) {
+    async execute(args:any) {
       if (!args.description || args.description.trim().length === 0) {
-        return "Error: description is required. Please provide a personality description."
+        return { content: "Error: description is required. Please provide a personality description." }
       }
 
       const scope = args.scope ?? "project"
@@ -92,16 +93,7 @@ export function createSavePersonalityTool(
       // Use name as the personality key, fall back to active personality or "default"
       const key = args.name?.trim() || configResult.file?.active || "default"
       savePersonalityToFile(scopePath, key, definition, true)
-
-      await client.tui.showToast({
-        body: {
-          title: "Personality Saved",
-          message: `"${key}" saved to ${scope} and set as active`,
-          variant: "success",
-        },
-      })
-
-      return `Personality "${key}" saved to ${scope} (${scopePath}) and set as active.`
+      return { content: `Personality "${key}" saved to ${scope} (${scopePath}) and set as active.` }
     },
-  })
+  });
 }

@@ -3,7 +3,6 @@ import type {
   PersonalityFile,
   ParsedCommand,
   ConfigResult,
-  CommandOutput,
 } from "../types.js"
 import {
   mergeWithDefaults,
@@ -193,9 +192,8 @@ function formatPersonalityList(file: PersonalityFile): string {
 
 export async function handlePersonalityCommand(
   args: string,
-  configResult: ConfigResult,
-  output: CommandOutput
-): Promise<void> {
+  configResult: ConfigResult
+): Promise<string|undefined> {
   const parsed = parseCommandArgs(args)
   const sub = parsed.subcommand
   const config = configResult.config
@@ -207,92 +205,47 @@ export async function handlePersonalityCommand(
   const scopePath = resolveScopePath(scope, configResult)
 
   if (!sub || sub === "help") {
-    output.parts.push({
-      type: "text",
-      text: buildPersonalityHelp(),
-    })
-    return
+    return buildPersonalityHelp()
   }
 
   if (sub === "list") {
     if (!file) {
-      output.parts.push({
-        type: "text",
-        text: "No personalities configured. Use `/personality create` to create one.",
-      })
-      return
+      return "No personalities configured. Use `/personality create` to create one."
     }
-    output.parts.push({
-      type: "text",
-      text: `Personalities:\n${formatPersonalityList(file)}`,
-    })
-    return
+    return  `Personalities:\n${formatPersonalityList(file)}`
   }
 
   if (sub === "switch") {
     if (!file) {
-      output.parts.push({
-        type: "text",
-        text: "No personalities configured. Use `/personality create` to create one.",
-      })
-      return
+      return "No personalities configured. Use `/personality create` to create one."
     }
 
     const targetName = parsed.args[0]
     if (!targetName) {
-      output.parts.push({
-        type: "text",
-        text: `Available personalities:\n${formatPersonalityList(file)}\n\nUsage: /personality switch <name>`,
-      })
-      return
+      return  `Available personalities:\n${formatPersonalityList(file)}\n\nUsage: /personality switch <name>`
     }
 
     if (!(targetName in file.personalities)) {
       const names = listPersonalities(file)
-      output.parts.push({
-        type: "text",
-        text: `Personality "${targetName}" not found.\nAvailable: ${names.join(", ")}`,
-      })
-      return
+      return`Personality "${targetName}" not found.\nAvailable: ${names.join(", ")}`
     }
 
     if (targetName === file.active) {
-      output.parts.push({
-        type: "text",
-        text: `"${targetName}" is already the active personality.`,
-      })
-      return
+      return `"${targetName}" is already the active personality.`
     }
-
     switchActiveInFile(scopePath, targetName)
-    output.parts.push({
-      type: "text",
-      text: `Switched active personality to "${targetName}". Restart the session for the change to take full effect.`,
-    })
-    return
+    return `Switched active personality to "${targetName}". Restart the session for the change to take full effect.`
   }
 
   if (sub === "show") {
-    if (parsed.flags.all && file) {
-      output.parts.push({
-        type: "text",
-        text: `Active: ${activeKey}\n\n${JSON.stringify(file, null, 2)}`,
-      })
-    } else {
-      output.parts.push({
-        type: "text",
-        text: `Active personality: ${activeKey}\n\n${formatConfigOutput(config)}`,
-      })
-    }
-    return
+    if (parsed.flags.all && file)
+      return `Active: ${activeKey}\n\n${JSON.stringify(file, null, 2)}`;
+     else
+        return `Active personality: ${activeKey}\n\n${formatConfigOutput(config)}`;
   }
 
   if (sub === "create") {
-    output.parts.push({
-      type: "text",
-      text: buildCreatePrompt(scope),
-    })
-    return
+    return buildCreatePrompt(scope)
   }
 
   if (sub === "edit") {
@@ -301,26 +254,13 @@ export async function handlePersonalityCommand(
 
     if (field && value) {
       if (!file) {
-        output.parts.push({
-          type: "text",
-          text: "No personality to edit. Use `/personality create` first.",
-        })
-        return
+        return  "No personality to edit. Use `/personality create` first."
       }
       const nextConfig = applyFieldUpdate(config, field, value)
       savePersonalityToFile(scopePath, activeKey, nextConfig, false)
-      output.parts.push({
-        type: "text",
-        text: `Updated ${field} for "${activeKey}" in ${scope}.`,
-      })
-      return
+      return `Updated ${field} for "${activeKey}" in ${scope}.`
     }
-
-    output.parts.push({
-      type: "text",
-      text: buildEditPrompt(scope, config, activeKey),
-    })
-    return
+    return  buildEditPrompt(scope, config, activeKey)
   }
 
   if (sub === "reset") {
@@ -330,70 +270,44 @@ export async function handlePersonalityCommand(
 
     if (!confirmed) {
       if (targetName) {
-        output.parts.push({
-          type: "text",
-          text: `To remove personality "${targetName}" from ${scope}, run:\n  /personality reset --name ${targetName} --scope ${scope} --confirm`,
-        })
+          return `To remove personality "${targetName}" from ${scope}, run:\n  /personality reset --name ${targetName} --scope ${scope} --confirm`;
       } else {
-        output.parts.push({
-          type: "text",
-          text: `To reset all personality config for ${scope}, run:\n  /personality reset --scope ${scope} --confirm`,
-        })
+          return `To reset all personality config for ${scope}, run:\n  /personality reset --scope ${scope} --confirm`;
       }
-      return
     }
 
     if (targetName) {
       // Remove specific personality from scope-specific file
       const scopeFile = loadPersonalityFile(scopePath)
       if (!scopeFile) {
-        output.parts.push({
-          type: "text",
-          text: `No personality config found for ${scope}.`,
-        })
-        return
+        return `No personality config found for ${scope}.`
       }
 
       if (!(targetName in scopeFile.personalities)) {
         const names = listPersonalities(scopeFile)
-        output.parts.push({
-          type: "text",
-          text: `Personality "${targetName}" not found in ${scope}.\nAvailable in ${scope}: ${names.join(", ")}`,
-        })
-        return
+        return `Personality "${targetName}" not found in ${scope}.\nAvailable in ${scope}: ${names.join(", ")}`
       }
 
       const nextFile = removePersonality(scopeFile, targetName)
       if (!nextFile) {
         if (existsSync(scopePath)) unlinkSync(scopePath)
-        output.parts.push({
-          type: "text",
-          text: `Removed "${targetName}" (last personality). Config file deleted for ${scope}.`,
-        })
+        return `Removed "${targetName}" (last personality). Config file deleted for ${scope}.`;
+
       } else {
         writePersonalityFile(scopePath, nextFile)
-        output.parts.push({
-          type: "text",
-          text: `Removed personality "${targetName}" from ${scope}.${scopeFile.active === targetName ? ` Active personality switched to "${nextFile.active}".` : ""}`,
-        })
+        return`Removed personality "${targetName}" from ${scope}.${scopeFile.active === targetName ? ` Active personality switched to "${nextFile.active}".` : ""}`
       }
-      return
+
     }
 
     // Reset entire file
     if (existsSync(scopePath)) {
       unlinkSync(scopePath)
-      output.parts.push({
-        type: "text",
-        text: `Personality reset for ${scope}.`,
-      })
+
+      return `Personality reset for ${scope}.`;
     } else {
-      output.parts.push({
-        type: "text",
-        text: `No personality config found for ${scope}.`,
-      })
+        return `No personality config found for ${scope}.`;
     }
-    return
   }
 
   output.parts.push({
